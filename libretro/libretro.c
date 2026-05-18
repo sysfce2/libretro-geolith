@@ -69,6 +69,11 @@ static size_t numsamps = 0;
 // Copy of the ROM data passed in by the frontend
 static void *romdata = NULL;
 
+/* Byteswapped Main RAM -- Allow achievements which were written for emulators
+   which use host-native byte order rather than emulated system byte order.
+*/
+static uint8_t mainram_shadow[SIZE_64K];
+
 // CD mode flag and system type
 static int cd_mode = 0;
 static int cd_systype = SYSTEM_CDZ;
@@ -262,6 +267,15 @@ static kvpair_t bindmap_vliner[] = {
     { RETRO_DEVICE_ID_JOYPAD_START,     0x20 }, // Clear Credit
     { RETRO_DEVICE_ID_JOYPAD_R3,        0x80 }, // Hopper Out
 };
+
+static void update_mainram_shadow(void) {
+    size_t sz = 0;
+    const uint8_t *src = geo_mem_ptr(GEO_MEMTYPE_MAINRAM, &sz);
+    for (size_t i = 0; i < SIZE_64K; i += 2) {
+        mainram_shadow[i] = src[i + 1];
+        mainram_shadow[i + 1] = src[i];
+    }
+}
 
 static void geo_retro_log(int level, const char *fmt, ...) {
     if (log_cb == NULL)
@@ -1193,6 +1207,10 @@ void retro_run(void) {
     // Display frame
     geo_exec();
 
+    // Byteswap the main RAM into a shadow buffer for achievements
+    if (!cd_mode)
+        update_mainram_shadow();
+
     bool update = false;
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &update) && update) {
         check_variables(false);
@@ -1410,7 +1428,8 @@ bool retro_load_game(const struct retro_game_info *info) {
     // Expose memory maps for RetroArch cheats/achievements
     /* https://github.com/RetroAchievements/rcheevos/issues/302
      * This issue needs to be addressed before achievements can be enabled in
-     * a reliable and working state.
+     * a reliable and working state for CD systems. One challenge is the PRAM
+     * being 2MB, so swapping byte order every frame is less than wonderful.
     */
     /*if (cd_mode) {
         static struct retro_memory_descriptor cd_descs[] = {
@@ -1498,7 +1517,7 @@ void *retro_get_memory_data(unsigned id) {
             return NULL;
         }
         case RETRO_MEMORY_SYSTEM_RAM: {
-            return (void*)geo_mem_ptr(GEO_MEMTYPE_MAINRAM, NULL);
+            return (void*)mainram_shadow;
         }
         case RETRO_MEMORY_VIDEO_RAM: {
             return (void*)geo_mem_ptr(GEO_MEMTYPE_VRAM, NULL);
@@ -1519,7 +1538,7 @@ size_t retro_get_memory_size(unsigned id) {
             return 0;
         }
         case RETRO_MEMORY_SYSTEM_RAM: {
-            mem = (void*)geo_mem_ptr(GEO_MEMTYPE_MAINRAM, &sz);
+            sz = SIZE_64K;
             break;
         }
         case RETRO_MEMORY_VIDEO_RAM: {

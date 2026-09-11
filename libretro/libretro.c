@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022-2025 Rupert Carmichael
+Copyright (c) 2022-2026 Rupert Carmichael
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -47,8 +47,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "libretro.h"
 #include "libretro_core_options.h"
-#include "md5.h"
-#include "gamedb.h"
 
 // libretro-common
 #include "compat/strl.h"
@@ -73,9 +71,6 @@ static size_t numsamps = 0;
 
 // Copy of the ROM data passed in by the frontend
 static void *romdata = NULL;
-
-// ROM data verification
-static int verified = 0;
 
 // CD mode flag and system type
 static int cd_mode = 0;
@@ -280,22 +275,6 @@ static inline char geo_nyb_hexchar(unsigned nyb) {
     else
         nyb += '0';
     return (char)nyb;
-}
-
-static void geo_hash_md5(char *md5, const void *data, size_t md5len) {
-    MD5_CTX c;
-    uint8_t *dataptr = (uint8_t*)data;
-    uint8_t digest[16];
-    MD5_Init(&c);
-    MD5_Update(&c, dataptr, md5len);
-    MD5_Final(digest, &c);
-
-    // Convert the digest to a string without dodgy calls to snprintf
-    for (size_t i = 0; i < 16; ++i) {
-        md5[i * 2] = geo_nyb_hexchar(digest[i] >> 4);
-        md5[(i * 2) + 1] = geo_nyb_hexchar(digest[i]);
-    }
-    md5[32] = '\0';
 }
 
 static void geo_retro_log(int level, const char *fmt, ...) {
@@ -1279,16 +1258,6 @@ bool retro_load_game(const struct retro_game_info *info) {
                 return false;
             }
 
-            // Grab the MD5 checksum and try to verify
-            char md5[33];
-            geo_hash_md5(md5, romdata, sz);
-            for (size_t i = 0; i < sizeof(gamedb_neo) / sizeof(char*); ++i) {
-                if (!strcmp(md5, gamedb_neo[i])) {
-                    verified = 1;
-                    break;
-                }
-            }
-
             if (!geo_neo_load(romdata, sz)) {
                 log_cb(RETRO_LOG_ERROR, "Failed to load ROM\n");
                 retro_unload_game();
@@ -1395,7 +1364,7 @@ bool retro_load_game(const struct retro_game_info *info) {
         };
         environ_cb(RETRO_ENVIRONMENT_SET_MEMORY_MAPS, &cd_mmap);
     }
-    else if (verified) { // Only set up memory descriptors if ROM is known
+    else { // Rely on rcheevos/RetroAchievements to verify the ROM validity
         static struct retro_memory_descriptor cart_descs[] = {
             // User/System RAM: 0x100000 - 0x10ffff (64K mirrored)
             { RETRO_MEMDESC_SYSTEM_RAM | RETRO_MEMDESC_BIGENDIAN,
@@ -1443,8 +1412,6 @@ void retro_unload_game(void) {
         free(romdata);
 
     geo_bios_unload();
-
-    verified = 0;
 }
 
 unsigned retro_get_region(void) {
